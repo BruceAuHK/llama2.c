@@ -16,6 +16,9 @@ $ ./run
 #include <unistd.h>
 #include <fcntl.h>
 #include <sys/mman.h>
+#include <Accelerate/Accelerate.h>
+#include <omp.h>
+
 
 // ----------------------------------------------------------------------------
 // Transformer and RunState structs, and related memory management
@@ -190,15 +193,9 @@ void softmax(float* x, int size) {
 
 void matmul(float* xout, float* x, float* w, int n, int d) {
     // W (d,n) @ x (n,) -> xout (d,)
-    #pragma omp parallel for
-    for (int i = 0; i < d; i++) {
-        float val = 0.0f;
-        for (int j = 0; j < n; j++) {
-            val += w[i * n + j] * x[j];
-        }
-        xout[i] = val;
-    }
+    cblas_sgemv(CblasRowMajor, CblasNoTrans, d, n, 1.0f, w, n, x, 1, 0.0f, xout, 1);
 }
+
 
 void transformer(int token, int pos, Config* p, RunState* s, TransformerWeights* w) {
     
@@ -215,6 +212,13 @@ void transformer(int token, int pos, Config* p, RunState* s, TransformerWeights*
     // pluck out the "pos" row of freq_cis_real and freq_cis_imag
     float* freq_cis_real_row = w->freq_cis_real + pos * head_size / 2;
     float* freq_cis_imag_row = w->freq_cis_imag + pos * head_size / 2;
+
+	// Set the number of threads to the number of available processor cores
+    omp_set_num_threads(omp_get_num_procs());
+
+    // Enable OpenMP parallelization for this loop
+    #pragma omp parallel
+    #pragma omp parallel for
 
     // forward all the layers
     for(int l = 0; l < p->n_layers; l++) {
